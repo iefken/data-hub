@@ -613,5 +613,52 @@ final readonly class ConfigurationService implements ConfigurationServiceInterfa
                 errorKey: 'data-hub.import-config-invalid'
             );
         }
+
+        if (is_array($configuration)) {
+            $this->validateImportSectionTypes($configuration);
+        }
+    }
+
+    /**
+     * One level down: a wrongly typed section is rejected before persist() or the Studio GET use it.
+     * A missing section, null and an array are always fine; which other values stay accepted depends
+     * on what each section does with them today (isAcceptedSectionValue()).
+     */
+    private function validateImportSectionTypes(array $configuration): void
+    {
+        foreach (['general', 'workspaces', 'permissions', 'security', 'schema'] as $section) {
+            if (
+                array_key_exists($section, $configuration)
+                && !$this->isAcceptedSectionValue($section, $configuration[$section])
+            ) {
+                throw new ValidationFailedException(
+                    message: sprintf(
+                        'Uploaded configuration data is invalid. Section "%s" must be an object.',
+                        $section
+                    ),
+                    errorKey: 'data-hub.import-config-invalid'
+                );
+            }
+        }
+    }
+
+    private function isAcceptedSectionValue(string $section, mixed $value): bool
+    {
+        if ($value === null || is_array($value)) {
+            return true;
+        }
+
+        return match ($section) {
+            // persist() writes type, path and name into general, and the Studio GET writes into schema:
+            // false still becomes an array (PHP deprecation warning), "" and 0 fail with an Error.
+            'general', 'schema' => $value === false,
+            // persist() only fills in workspaces when it is not set; any other value reaches
+            // WorkspaceHelper::cleanupWorkspaces(array) and fails there.
+            'workspaces' => false,
+            // Empty values import today as "nothing set". A non-empty non-array did too, but a string
+            // permissions section falls back to the adapter-wide permission in isAllowed().
+            'permissions', 'security' => empty($value),
+            default => true,
+        };
     }
 }

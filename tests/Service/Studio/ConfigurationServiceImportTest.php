@@ -109,6 +109,89 @@ class ConfigurationServiceImportTest extends Unit
         ];
     }
 
+    /**
+     * @dataProvider acceptedSectionsProvider
+     */
+    public function testImportAcceptsSectionsThatImportToday(array $importData): void
+    {
+        $this->validate($importData);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * @dataProvider wronglyTypedSectionsProvider
+     */
+    public function testImportRejectsWronglyTypedSectionsAsValidationError(array $importData): void
+    {
+        $exception = null;
+
+        try {
+            $this->validate($importData);
+        } catch (ValidationFailedException $e) {
+            $exception = $e;
+        }
+
+        $this->assertInstanceOf(ValidationFailedException::class, $exception);
+        $this->assertSame('data-hub.import-config-invalid', $exception->getErrorKey());
+        $this->assertSame(422, $exception->getStatusCode());
+    }
+
+    /**
+     * Values that import without an error today stay accepted. Empty permissions or security
+     * mean "none set"; persist() fills in general, workspaces and permissions when they are empty.
+     */
+    public static function acceptedSectionsProvider(): array
+    {
+        return self::sectionCases([
+            'general' => [null, false, [], ['active' => true]],
+            'workspaces' => [null, []],
+            'permissions' => [null, '', 0, false, []],
+            'security' => [null, '', 0, false, []],
+            'schema' => [null, false, []],
+        ]);
+    }
+
+    /**
+     * general and workspaces: these already end in a TypeError/Error (HTTP 500) when imported.
+     * permissions and security: a non-empty non-array imports today, but is never a valid value.
+     * schema: "", 0, true and 1 import today, but opening the config in Studio fails afterwards.
+     */
+    public static function wronglyTypedSectionsProvider(): array
+    {
+        return self::sectionCases([
+            'general' => ['x', '', 0, true],
+            'workspaces' => ['x', '', 0, false, true],
+            'permissions' => ['x', true, 1],
+            'security' => ['x', true, 1],
+            'schema' => ['x', '', 0, true, 1],
+        ]);
+    }
+
+    /**
+     * One import file per section value, named like 'schema is ""', with every other section left out.
+     *
+     * @param array<string, list<mixed>> $valuesPerSection
+     */
+    private static function sectionCases(array $valuesPerSection): array
+    {
+        $cases = [];
+
+        foreach ($valuesPerSection as $section => $values) {
+            foreach ($values as $value) {
+                $name = sprintf('%s is %s', $section, json_encode($value, JSON_THROW_ON_ERROR));
+                $cases[$name] = [[
+                    'type' => 'graphql',
+                    'path' => '',
+                    'name' => 'pme',
+                    'configuration' => [$section => $value],
+                ]];
+            }
+        }
+
+        return $cases;
+    }
+
     public static function invalidFileContentProvider(): array
     {
         return [
